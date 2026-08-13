@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# Data & generated artifacts
+data/*.txt
+data/processed/
+
+# Ignore generated reports, but keep the confusion matrix embedded in the README.
+reports/*
+!reports/confusion_matrix.png
+
+# Trained models are large; keep them out of git by default.
+# Comment these out if you want to version the trained artifacts.
+models/*.pt
+models/*.pkl
+models/metadata.json
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

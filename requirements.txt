@@ -1,0 +1,27 @@
+# Core ML / data
+torch>=2.0.0
+numpy>=1.24
+pandas>=2.0
+scikit-learn>=1.3
+joblib>=1.3
+
+# Web app
+flask>=3.0
+gunicorn>=21.0
+
+# Config / utilities
+pyyaml>=6.0
+requests>=2.31
+
+# Evaluation plots (optional but used by src/evaluate.py)
+matplotlib>=3.7
+seaborn>=0.12
+
+# Tests
+pytest>=7.4
+
+# ---------------------------------------------------------------------------
+# NOTE: `torch` above installs the default build. For a guaranteed CPU-only
+# wheel (smaller, no CUDA), install with:
+#     pip install torch --index-url https://download.pytorch.org/whl/cpu
+# ---------------------------------------------------------------------------

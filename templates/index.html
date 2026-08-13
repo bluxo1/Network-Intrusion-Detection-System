@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NIDS &middot; Network Intrusion Detection</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap">
+      <h1>🛡️ Network Intrusion Detection System</h1>
+      <p class="subtitle">PyTorch two-stage classifier &middot; NSL-KDD &middot; Normal / DOS / PROBE / R2L / U2R</p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    {% if not models_ready %}
+    <div class="banner banner-warn">
+      ⚠️ <strong>Models not trained yet.</strong> Run
+      <code>python data/download_data.py</code> then <code>python -m src.train</code>,
+      and restart the app to enable predictions.
+    </div>
+    {% endif %}
+
+    <div class="toolbar">
+      <span class="toolbar-label">Load a sample:</span>
+      <button type="button" class="preset" data-preset="normal">🟢 Normal</button>
+      <button type="button" class="preset" data-preset="dos">🔴 DOS</button>
+      <button type="button" class="preset" data-preset="probe">🟡 PROBE</button>
+      <button type="button" class="preset" data-preset="r2l">🟠 R2L</button>
+      <button type="button" class="preset" data-preset="u2r">🟣 U2R</button>
+      <button type="button" class="preset ghost" id="reset-btn">↺ Reset</button>
+    </div>
+
+    <form id="nids-form" action="{{ url_for('predict') }}" method="POST">
+      {% for group in groups %}
+      <fieldset class="group">
+        <legend>{{ group.name }}</legend>
+        <div class="grid">
+          {% for f in group.fields %}
+          <div class="field">
+            <label for="{{ f.name }}">{{ f.label }}</label>
+            {% if f.type == 'select' %}
+              <select id="{{ f.name }}" name="{{ f.name }}">
+                {% for opt in f.options %}
+                <option value="{{ opt }}" {% if opt == f.default %}selected{% endif %}>{{ opt }}</option>
+                {% endfor %}
+              </select>
+            {% else %}
+              <input
+                type="number"
+                id="{{ f.name }}"
+                name="{{ f.name }}"
+                value="{{ f.default }}"
+                step="{{ f.step }}"
+                min="{{ f.min }}"
+                {% if f.max is defined %}max="{{ f.max }}"{% endif %}
+              />
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </fieldset>
+      {% endfor %}
+
+      <div class="actions">
+        <button type="submit" class="submit-btn" {% if not models_ready %}disabled{% endif %}>
+          🔍 Analyze Traffic
+        </button>
+      </div>
+    </form>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <p>NIDS-PyTorch &middot; educational / research use &middot; NSL-KDD 41-feature model</p>
+    </div>
+  </footer>
+
+  <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

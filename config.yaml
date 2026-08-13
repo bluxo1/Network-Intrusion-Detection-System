@@ -1,0 +1,43 @@
+# =============================================================================
+# NIDS-PyTorch configuration
+# All paths are relative to the project root.
+# =============================================================================
+
+paths:
+  data_dir: "data"
+  train_file: "data/KDDTrain+.txt"
+  test_file: "data/KDDTest+.txt"
+  processed_dir: "data/processed"
+  models_dir: "models"
+
+artifacts:
+  scaler: "models/scaler.pkl"
+  encoder: "models/encoder.pkl"
+  label_encoder: "models/label_encoder.pkl"
+  metadata: "models/metadata.json"
+  binary_model: "models/binary_model.pt"
+  multiclass_model: "models/multiclass_model.pt"
+
+training:
+  seed: 42
+  val_split: 0.15          # fraction of KDDTrain+ held out for validation
+  batch_size: 256
+  epochs: 60
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  lr_step_size: 15         # StepLR: decay LR every N epochs
+  lr_gamma: 0.5            # StepLR: multiply LR by this factor
+  early_stopping_patience: 10
+  use_class_weights: true  # weight CrossEntropyLoss by inverse class frequency
+  device: "auto"           # "auto" | "cpu" | "cuda"
+
+model:
+  binary_hidden: [128, 64, 32]
+  binary_dropout: [0.3, 0.2, 0.0]
+  multiclass_hidden: [256, 128, 64]
+  multiclass_dropout: [0.4, 0.3, 0.2]
+
+inference:
+  # Probability threshold on the binary model above which traffic is flagged
+  # as an attack. Lower it to increase recall (catch more attacks).
+  attack_threshold: 0.5

@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NIDS &middot; Result</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap">
+      <h1>🛡️ Detection Result</h1>
+    </div>
+  </header>
+
+  <main class="wrap">
+    {% if error %}
+      <div class="banner banner-error">❌ {{ error }}</div>
+      <div class="actions"><a class="submit-btn" href="{{ url_for('index') }}">← Back</a></div>
+    {% else %}
+      <section class="result-card" style="--accent: {{ style.color }};">
+        <div class="result-head">
+          <span class="result-emoji">{{ style.emoji }}</span>
+          <div>
+            <div class="result-label">{{ result.predicted_class }}</div>
+            <div class="result-desc">{{ style.desc }}</div>
+          </div>
+        </div>
+
+        <div class="metric-row">
+          <div class="metric">
+            <span class="metric-name">Verdict</span>
+            <span class="metric-value">{{ 'ATTACK' if result.is_attack else 'NORMAL' }}</span>
+          </div>
+          <div class="metric">
+            <span class="metric-name">Confidence</span>
+            <span class="metric-value">{{ (result.confidence * 100) | round(2) }}%</span>
+          </div>
+          <div class="metric">
+            <span class="metric-name">Attack probability</span>
+            <span class="metric-value">{{ (result.attack_probability * 100) | round(2) }}%</span>
+          </div>
+        </div>
+
+        <div class="confidence-wrap">
+          <div class="confidence-bar">
+            <div class="confidence-fill" style="width: {{ (result.confidence * 100) | round(2) }}%;"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="probs">
+        <h2>Per-class probability (multi-class model)</h2>
+        {% for name, prob in result.class_probabilities.items() %}
+        <div class="prob-row">
+          <span class="prob-name" style="color: {{ class_style[name].color }};">
+            {{ class_style[name].emoji }} {{ name }}
+          </span>
+          <div class="prob-track">
+            <div class="prob-fill"
+                 style="width: {{ (prob * 100) | round(2) }}%; background: {{ class_style[name].color }};"></div>
+          </div>
+          <span class="prob-val">{{ (prob * 100) | round(2) }}%</span>
+        </div>
+        {% endfor %}
+      </section>
+
+      <div class="actions">
+        <a class="submit-btn" href="{{ url_for('index') }}">← Analyze another</a>
+      </div>
+    {% endif %}
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap"><p>NIDS-PyTorch &middot; two-stage inference</p></div>
+  </footer>
+</body>
+</html>
