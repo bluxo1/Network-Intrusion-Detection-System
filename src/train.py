@@ -208,8 +208,12 @@ def main() -> None:
 
     # ======================= Multi-class model =======================
     print("\n=== Training multi-class classifier (5 classes) ===")
+    # drop_last=True guards the BatchNorm1d layer in the multi-class model:
+    # a trailing batch of size 1 would raise "Expected more than 1 value per
+    # channel when training". Dropping it costs <1 batch/epoch of data.
     mc_train = DataLoader(
-        NIDSDataset(X_tr, y_tr, binary=False), batch_size=tcfg["batch_size"], shuffle=True
+        NIDSDataset(X_tr, y_tr, binary=False),
+        batch_size=tcfg["batch_size"], shuffle=True, drop_last=True,
     )
     mc_val = DataLoader(
         NIDSDataset(X_val, y_val, binary=False), batch_size=tcfg["batch_size"], shuffle=False
