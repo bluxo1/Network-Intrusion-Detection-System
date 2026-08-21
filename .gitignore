@@ -14,11 +14,8 @@ data/processed/
 reports/*
 !reports/confusion_matrix.png
 
-# Trained models are large; keep them out of git by default.
-# Comment these out if you want to version the trained artifacts.
-models/*.pt
-models/*.pkl
-models/metadata.json
+# Trained artifacts are small (~400 KB total) and are committed on purpose so
+# the app can be deployed straight from this repo without a training step.
 
 # OS / editor
 .DS_Store
