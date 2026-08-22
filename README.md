@@ -47,7 +47,6 @@ transformation is guaranteed identical between training and serving.
 ├── config.yaml               # Hyperparameters & artifact paths
 ├── requirements.txt
 ├── run_all.py                # download → preprocess → train → evaluate
-├── Dockerfile / docker-compose.yml
 │
 ├── data/
 │   └── download_data.py      # Fetch NSL-KDD from public mirrors
@@ -229,24 +228,11 @@ Multi-class accuracy: 78.2%.
 
 ![Confusion matrix](reports/confusion_matrix.png)
 
-## 🐳 Docker
-
-```bash
-docker build -t nids-pytorch .
-docker run -p 5000:5000 nids-pytorch
-# or:
-docker compose up --build
-```
-
-The image serves the app with **gunicorn** (`4 workers`) and includes a
-`/health` healthcheck. Train the models first — the compose file mounts
-`./models` into the container so you don't have to rebuild after retraining.
-
 ## 🏭 Production notes
 
 - Serve with gunicorn: `gunicorn -w 4 -b 0.0.0.0:5000 app.app:app`.
 - Models load **once per worker** (cached singleton) for fast inference.
-- `GET /health` is suitable for load-balancer / k8s probes.
+- `GET /health` is suitable for uptime and load-balancer probes.
 - Lower `inference.attack_threshold` in `config.yaml` to trade false alarms for
   higher detection recall.
 
