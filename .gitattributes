@@ -1,0 +1,22 @@
+# Normalise line endings so Windows and Linux checkouts stop producing
+# phantom whole-file diffs. Text is stored as LF in the repo and checked out
+# in the platform's native form.
+* text=auto
+
+# Explicitly text
+*.py     text
+*.md     text
+*.txt    text
+*.yaml   text
+*.yml    text
+*.html   text
+*.css    text
+*.js     text
+*.json   text
+*.ipynb  text
+
+# Binary - never line-ending convert, never diff as text
+*.pt     binary
+*.pkl    binary
+*.npz    binary
+*.png    binary
