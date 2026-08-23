@@ -1,5 +1,12 @@
 # 🛡️ ML-Based Network Intrusion Detection System (NIDS)
 
+![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
+![PyTorch](https://img.shields.io/badge/PyTorch-2.13-EE4C2C?logo=pytorch&logoColor=white)
+![Flask](https://img.shields.io/badge/Flask-3.1-000000?logo=flask&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-4%2F4%20passing-brightgreen)
+![Validation](https://img.shields.io/badge/validation-99.6%25-brightgreen)
+![KDDTest+](https://img.shields.io/badge/KDDTest%2B-79.9%25-yellow)
+
 A production-ready **Network Intrusion Detection System** built with **PyTorch**
 and served as a live **Flask** web app. It classifies network traffic into five
 classes using the **NSL-KDD** dataset (41 features):
@@ -17,6 +24,21 @@ The detector uses a **two-stage (layered) strategy**:
 1. A **binary** neural network decides *Normal vs Attack* (high-recall gate).
 2. If flagged as an attack, a **multi-class** neural network identifies the
    specific attack type.
+
+> **Why two stages instead of one 5-class model?** The two questions carry very
+> different costs. Missing an attack outright is far worse than mislabelling
+> which family it belongs to, so stage 1 optimises purely for recall behind a
+> single tunable dial (`inference.attack_threshold`) that trades false alarms
+> for detection. Stage 2 then types the attack *already knowing* it is hostile,
+> so it never spends capacity separating 67,343 normal connections from 52 U2R
+> ones — it only has to tell four attack families apart.
+
+**Contents** — [Architecture](#-architecture) · [Dataset](#-dataset) ·
+[Structure](#-project-structure) · [Quickstart](#-quickstart) ·
+[Web UI](#-using-the-web-ui) · [JSON API](#-json-api) ·
+[Model details](#-model-details) · [Results](#-results) ·
+[Production](#-production-notes) · [Troubleshooting](#-troubleshooting) ·
+[Configuration](#-configuration)
 
 ---
 
@@ -37,6 +59,40 @@ The detector uses a **two-stage (layered) strategy**:
 The **exact same** preprocessing objects (`StandardScaler` + `OneHotEncoder`)
 fitted during training are serialized and reloaded at inference time, so the
 transformation is guaranteed identical between training and serving.
+
+---
+
+## 🗃️ Dataset
+
+**NSL-KDD** — the de-duplicated successor to KDD Cup '99, with the redundant
+records that let naive models score artificially high removed.
+
+| Class | Train | % | KDDTest+ | % | Note |
+|-------|------:|------:|---------:|------:|------|
+| 🟢 Normal | 67,343 | 53.46% | 9,711 | 43.08% | |
+| 🔴 DOS    | 45,927 | 36.46% | 7,460 | 33.09% | |
+| 🟡 PROBE  | 11,656 |  9.25% | 2,421 | 10.74% | |
+| 🟠 R2L    |    995 |  0.79% | 2,885 | 12.80% | **16× over-represented in test** |
+| 🟣 U2R    |     52 |  0.04% |    67 |  0.30% | 7× over-represented in test |
+| **Total** | **125,973** | | **22,544** | | |
+
+Two properties of this table drive everything else in the project:
+
+1. **Extreme training imbalance** — 67,343 Normal connections against **52**
+   U2R, a 1,295:1 ratio. Unweighted training simply ignores U2R and still
+   scores well, so the multi-class loss is weighted by inverse class frequency
+   (U2R receives ~487× the weight of Normal) to force the model to care about
+   the rare classes.
+2. **KDDTest+ is a deliberately different distribution.** R2L is 0.79% of the
+   training set but 12.80% of the test set, and most of those test records are
+   attack variants that never appear in training. This is the single reason the
+   two result regimes below diverge so sharply — and why quoting only the
+   validation figure would misrepresent the system.
+
+**Feature encoding** — every connection carries 41 features: **38 numeric**
+(z-score standardised) and **3 symbolic** (`protocol_type`, `service`, `flag`)
+one-hot expanded into **84** columns, for a final **122-dimensional** input
+vector.
 
 ---
 
@@ -179,16 +235,24 @@ Other routes: `GET /` (form), `POST /predict` (form submission), `GET /health`
 
 ## 🧠 Model details
 
-**Binary classifier** — `41→one-hot ≈120 → 128 → 64 → 32 → 1`, ReLU + dropout,
-`BCEWithLogitsLoss` with `pos_weight` to protect attack recall.
+**Binary classifier** — `122 → 128 → 64 → 32 → 1`, ReLU + dropout
+`[0.3, 0.2, 0.0]`, `BCEWithLogitsLoss` with `pos_weight` to protect attack
+recall.
 
-**Multi-class classifier** — `... → 256 (BatchNorm) → 128 → 64 → 5`, ReLU +
-dropout, `CrossEntropyLoss` weighted by inverse class frequency to handle the
-severe R2L/U2R imbalance.
+**Multi-class classifier** — `122 → 256 (BatchNorm) → 128 → 64 → 5`, ReLU +
+dropout `[0.4, 0.3, 0.2]`, `CrossEntropyLoss` weighted by inverse class
+frequency to handle the severe R2L/U2R imbalance. BatchNorm sits on the widest
+layer only, where it stabilises training against that imbalance.
 
-**Training** — Adam (`lr=1e-3`, weight decay `1e-4`), `StepLR` decay, early
-stopping on validation loss, stratified 85/15 train/val split of KDDTrain+.
-All knobs live in [`config.yaml`](config.yaml).
+**Training** — Adam (`lr=1e-3`, weight decay `1e-4`), `StepLR` decay (×0.5
+every 15 epochs), early stopping on validation loss (patience 10), stratified
+85/15 train/val split of KDDTrain+, batch size 256, seed 42. All knobs live in
+[`config.yaml`](config.yaml).
+
+> **Reproducibility** — with the pinned dependency versions the binary model
+> retrains bit-identically. The multi-class model varies in the third decimal,
+> confined to R2L/U2R, where a handful of sample flips move F1 by whole points
+> because those classes have only 8 and 149 validation examples respectively.
 
 ---
 
@@ -216,8 +280,27 @@ Multi-class accuracy: **99.6%** (per-class F1 ≈ 1.00 for Normal/DOS/PROBE).
 | Detection rate (recall)   | 67.6% |
 | Precision                 | 95.8% |
 | False-alarm rate          | 4.0%  |
+| ROC-AUC                   | 0.9362 |
 
 Multi-class accuracy: 78.2%.
+
+### Per-class F1 — where the generalisation gap actually lives
+
+| Class | Validation F1 | KDDTest+ F1 | Δ |
+|-------|--------------:|------------:|--:|
+| 🟢 Normal | 0.997 | 0.804 | −0.193 |
+| 🔴 DOS    | 0.999 | 0.904 | −0.095 |
+| 🟡 PROBE  | 0.991 | 0.716 | −0.275 |
+| 🟠 R2L    | 0.918 | **0.172** | **−0.746** |
+| 🟣 U2R    | 0.706 | 0.430 | −0.276 |
+
+**R2L is the whole story.** Its recall collapses from **94.0% → 9.5%** while
+precision stays high at 94.5% — the model has not become *imprecise* about R2L,
+it has gone *blind* to it. R2L attacks impersonate legitimate sessions
+(password guessing, malicious file transfer), so their KDDTest+ variants share
+almost no surface structure with the 995 examples in training, and the model
+files them as Normal. DOS and PROBE, whose signatures are structural rather
+than behavioural, degrade far more gracefully.
 
 > **Why the gap?** NSL-KDD's test set is deliberately constructed with attack
 > variants (especially R2L/U2R) that never appear in training, so it measures
@@ -249,6 +332,58 @@ pytest -q
 
 The endpoint tests pass whether or not models are trained (they assert the
 graceful 503 path when artifacts are missing).
+
+---
+
+## 🩺 Troubleshooting
+
+<details>
+<summary><strong>Predictions return 503 <code>models_not_trained</code></strong></summary>
+
+The artifacts in `models/` are missing. `GET /health` lists exactly which ones
+via `missing_artifacts`. Run `python -m src.train` to generate them.
+
+</details>
+
+<details>
+<summary><strong><code>ModuleNotFoundError: No module named 'fcntl'</code> when starting gunicorn</strong></summary>
+
+Gunicorn is Unix-only — `fcntl` does not exist on Windows. Use waitress
+instead: `python -m waitress --port=5000 app.app:app`. See
+[Production notes](#-production-notes).
+
+</details>
+
+<details>
+<summary><strong><code>DeprecationWarning: Setting the shape on a NumPy array...</code></strong></summary>
+
+Harmless, and **not** caused by stale artifacts — retraining will not clear it.
+It originates inside joblib's own read path (`numpy_pickle.py`), which assigns
+to `array.shape`, deprecated in NumPy 2.5. It fires on any joblib load
+regardless of when the file was written. No fixed joblib release exists yet,
+which is exactly why `numpy` is pinned to `2.5.2` in `requirements.txt` — an
+unpinned upgrade could turn this warning into a hard load failure.
+
+</details>
+
+<details>
+<summary><strong><code>FileNotFoundError</code> for KDDTrain+.txt</strong></summary>
+
+Run `python data/download_data.py`. If the mirrors are unreachable, download
+the NSL-KDD archive manually and drop `KDDTrain+.txt` and `KDDTest+.txt` into
+`data/`.
+
+</details>
+
+<details>
+<summary><strong>Changed <code>config.yaml</code> but nothing happened</strong></summary>
+
+`src/train.py` reuses the cached `data/processed/dataset.npz` and only re-runs
+preprocessing when that file is **missing**. If you changed anything affecting
+encoding or scaling, re-run `python -m src.preprocess` explicitly first, or
+delete the `.npz`.
+
+</details>
 
 ---
 
