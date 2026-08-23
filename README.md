@@ -230,7 +230,10 @@ Multi-class accuracy: 78.2%.
 
 ## 🏭 Production notes
 
-- Serve with gunicorn: `gunicorn -w 4 -b 0.0.0.0:5000 app.app:app`.
+- **Linux / macOS** - serve with gunicorn:
+  `gunicorn -w 4 -b 0.0.0.0:5000 app.app:app`.
+- **Windows** - gunicorn imports `fcntl` and cannot run there.
+  Use waitress instead: `python -m waitress --port=5000 app.app:app`.
 - Models load **once per worker** (cached singleton) for fast inference.
 - `GET /health` is suitable for uptime and load-balancer probes.
 - Lower `inference.attack_threshold` in `config.yaml` to trade false alarms for
