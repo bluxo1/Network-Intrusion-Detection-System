@@ -10,11 +10,22 @@ GET  /health       - liveness + model-availability probe
 
 Run locally:   python app/app.py
 Production:    gunicorn -w 4 -b 0.0.0.0:5000 app.app:app
+
+Security (opt-in, off by default so local demos keep working)
+-------------------------------------------------------------
+* NIDS_API_KEY   - if set, /api/predict requires an ``X-API-Key`` header that
+                   matches it (constant-time compared). Unset => open, as before.
+* NIDS_RATE_LIMIT- max requests/minute/client-IP for the inference endpoints.
+                   Defaults to 120; set to 0 to disable. Skipped under TESTING.
 """
 
+import hmac
 import json
+import logging
 import os
 import sys
+import time
+from collections import defaultdict, deque
 
 # Make the project root importable whether launched as `python app/app.py`
 # or `gunicorn app.app:app` from the repo root.
@@ -34,6 +45,49 @@ app = Flask(
     template_folder=os.path.join(PROJECT_ROOT, "templates"),
     static_folder=os.path.join(PROJECT_ROOT, "static"),
 )
+
+logger = logging.getLogger("nids.app")
+
+# --- Opt-in hardening for the inference endpoints -------------------------
+# Read once at import. Both features are inert unless configured, so existing
+# local/demo usage and the test-suite are unaffected.
+API_KEY = os.environ.get("NIDS_API_KEY", "").strip()
+try:
+    RATE_LIMIT = int(os.environ.get("NIDS_RATE_LIMIT", "120"))  # req/min/IP; 0 disables
+except ValueError:
+    RATE_LIMIT = 120
+_RATE_WINDOW_SEC = 60.0
+_hits: "defaultdict[str, deque]" = defaultdict(deque)
+
+
+def _client_ip() -> str:
+    """Best-effort client IP; trusts the first X-Forwarded-For hop if present."""
+    fwd = request.headers.get("X-Forwarded-For", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.remote_addr or "unknown"
+
+
+def _rate_limited(ip: str) -> bool:
+    """Fixed-window-per-IP limiter. No-op under TESTING or when disabled."""
+    if RATE_LIMIT <= 0 or app.config.get("TESTING"):
+        return False
+    now = time.monotonic()
+    dq = _hits[ip]
+    while dq and now - dq[0] > _RATE_WINDOW_SEC:
+        dq.popleft()
+    if len(dq) >= RATE_LIMIT:
+        return True
+    dq.append(now)
+    return False
+
+
+def _auth_ok() -> bool:
+    """True if auth is disabled, or the presented X-API-Key matches (constant-time)."""
+    if not API_KEY:
+        return True
+    presented = request.headers.get("X-API-Key", "")
+    return hmac.compare_digest(presented, API_KEY)
 
 # Per-class colour + emoji used for result styling in the templates.
 CLASS_STYLE = {
@@ -83,6 +137,12 @@ def index():
 
 @app.route("/predict", methods=["POST"])
 def predict():
+    if _rate_limited(_client_ip()):
+        return render_template(
+            "result.html", error="Too many requests. Please slow down and try again.",
+            class_style=CLASS_STYLE,
+        ), 429
+
     if not models_available():
         return render_template(
             "result.html", error=(
@@ -94,8 +154,10 @@ def predict():
     features = parse_form(request.form)
     try:
         result = get_predictor().predict_features(features)
-    except Exception as exc:  # noqa: BLE001 - surface a friendly message
-        return render_template("result.html", error=f"Prediction failed: {exc}",
+    except Exception:  # noqa: BLE001 - log detail server-side, stay generic to the client
+        logger.exception("prediction failed on /predict")
+        return render_template("result.html",
+                               error="Prediction failed due to an internal error.",
                                class_style=CLASS_STYLE), 500
 
     style = CLASS_STYLE.get(result["predicted_class"], CLASS_STYLE["Normal"])
@@ -108,6 +170,11 @@ def predict():
 @app.route("/api/predict", methods=["POST"])
 def api_predict():
     """JSON endpoint. Body: {"features": {<feature>: <value>, ...}} or a bare dict."""
+    if _rate_limited(_client_ip()):
+        return jsonify({"error": "rate_limited", "detail": "too many requests"}), 429
+    if not _auth_ok():
+        return jsonify({"error": "unauthorized"}), 401
+
     if not models_available():
         return jsonify({
             "error": "models_not_trained",
@@ -121,8 +188,9 @@ def api_predict():
 
     try:
         result = get_predictor().predict_features(features)
-    except Exception as exc:  # noqa: BLE001
-        return jsonify({"error": "prediction_failed", "detail": str(exc)}), 500
+    except Exception:  # noqa: BLE001 - log detail server-side, stay generic to the client
+        logger.exception("prediction failed on /api/predict")
+        return jsonify({"error": "prediction_failed"}), 500
     return jsonify(result)
 
 
