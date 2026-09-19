@@ -3,9 +3,9 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.13-EE4C2C?logo=pytorch&logoColor=white)
 ![Flask](https://img.shields.io/badge/Flask-3.1-000000?logo=flask&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-4%2F4%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-7%2F7%20passing-brightgreen)
 ![Validation](https://img.shields.io/badge/validation-99.6%25-brightgreen)
-![KDDTest+](https://img.shields.io/badge/KDDTest%2B-79.9%25-yellow)
+![KDDTest+](https://img.shields.io/badge/KDDTest%2B-80.3%25-yellow)
 
 A production-ready **Network Intrusion Detection System** built with **PyTorch**
 and served as a live **Flask** web app. It classifies network traffic into five
@@ -231,6 +231,28 @@ Response:
 Other routes: `GET /` (form), `POST /predict` (form submission), `GET /health`
 (liveness + whether models are loaded).
 
+### 🔒 Securing the endpoints
+
+Both hardening features are **opt-in and off by default**, so local use and the
+test-suite are unaffected. Enable them via environment variables before exposing
+the app on a network:
+
+| Env var | Effect | Default |
+|---------|--------|---------|
+| `NIDS_API_KEY` | When set, `POST /api/predict` requires a matching `X-API-Key` header (constant-time compared). | unset → open |
+| `NIDS_RATE_LIMIT` | Max requests/minute per client IP on the inference routes. `0` disables. | `120` |
+
+```bash
+NIDS_API_KEY=your-secret NIDS_RATE_LIMIT=60 python app/app.py
+
+curl -X POST http://localhost:5000/api/predict \
+  -H "Content-Type: application/json" -H "X-API-Key: your-secret" \
+  -d '{"features": {"protocol_type":"tcp","service":"http","flag":"SF"}}'
+```
+
+Model artifacts are loaded with `torch.load(..., weights_only=True)`, so a
+tampered `.pt` file cannot execute arbitrary code at load time.
+
 ---
 
 ## 🧠 Model details
@@ -266,8 +288,8 @@ regimes (regenerate anytime with `python -m src.evaluate` → `reports/metrics.j
 | Binary (Normal vs Attack) | Value |
 |---------------------------|-------|
 | Accuracy                  | **99.6%** |
-| Detection rate (recall)   | **99.7%** |
-| False-alarm rate          | **0.4%**  |
+| Detection rate (recall)   | **99.8%** |
+| False-alarm rate          | **0.5%**  |
 | ROC-AUC                   | 0.9999 |
 
 Multi-class accuracy: **99.6%** (per-class F1 ≈ 1.00 for Normal/DOS/PROBE).
@@ -276,26 +298,26 @@ Multi-class accuracy: **99.6%** (per-class F1 ≈ 1.00 for Normal/DOS/PROBE).
 
 | Binary (Normal vs Attack) | Value |
 |---------------------------|-------|
-| Accuracy                  | 79.9% |
-| Detection rate (recall)   | 67.6% |
-| Precision                 | 95.8% |
-| False-alarm rate          | 4.0%  |
+| Accuracy                  | 80.3% |
+| Detection rate (recall)   | 68.7% |
+| Precision                 | 95.4% |
+| False-alarm rate          | 4.4%  |
 | ROC-AUC                   | 0.9362 |
 
-Multi-class accuracy: 78.2%.
+Multi-class accuracy: 78.5%.
 
 ### Per-class F1 — where the generalisation gap actually lives
 
 | Class | Validation F1 | KDDTest+ F1 | Δ |
 |-------|--------------:|------------:|--:|
-| 🟢 Normal | 0.997 | 0.804 | −0.193 |
-| 🔴 DOS    | 0.999 | 0.904 | −0.095 |
+| 🟢 Normal | 0.997 | 0.807 | −0.190 |
+| 🔴 DOS    | 0.999 | 0.906 | −0.093 |
 | 🟡 PROBE  | 0.991 | 0.716 | −0.275 |
-| 🟠 R2L    | 0.918 | **0.172** | **−0.746** |
-| 🟣 U2R    | 0.706 | 0.430 | −0.276 |
+| 🟠 R2L    | 0.917 | **0.196** | **−0.721** |
+| 🟣 U2R    | 0.778 | 0.474 | −0.304 |
 
-**R2L is the whole story.** Its recall collapses from **94.0% → 9.5%** while
-precision stays high at 94.5% — the model has not become *imprecise* about R2L,
+**R2L is the whole story.** Its recall collapses from **94.0% → 11.0%** while
+precision stays high at 94.1% — the model has not become *imprecise* about R2L,
 it has gone *blind* to it. R2L attacks impersonate legitimate sessions
 (password guessing, malicious file transfer), so their KDDTest+ variants share
 almost no surface structure with the 995 examples in training, and the model
@@ -306,8 +328,11 @@ than behavioural, degrade far more gracefully.
 > variants (especially R2L/U2R) that never appear in training, so it measures
 > generalisation to *unseen* attacks. ~78–80% on KDDTest+ is consistent with
 > published results for this class of model — the 98%+ figure is the
-> in-distribution regime. Lower `inference.attack_threshold` in `config.yaml` to
-> trade a higher false-alarm rate for more detection recall.
+> in-distribution regime. `inference.attack_threshold` is set to **0.35** (down
+> from the neutral 0.5) to favour detection recall; lower it further to trade
+> more false alarms for more recall. On the rare R2L/U2R classes the threshold
+> barely moves the needle — those gains are dataset-limited and would need
+> retraining (e.g. resampling / focal loss), not a threshold change.
 
 ![Confusion matrix](reports/confusion_matrix.png)
 
@@ -321,6 +346,9 @@ than behavioural, degrade far more gracefully.
 - `GET /health` is suitable for uptime and load-balancer probes.
 - Lower `inference.attack_threshold` in `config.yaml` to trade false alarms for
   higher detection recall.
+- Before exposing the app, set `NIDS_API_KEY` and (optionally) `NIDS_RATE_LIMIT`
+  — see [Securing the endpoints](#-securing-the-endpoints). The endpoints are
+  otherwise unauthenticated.
 
 ---
 
