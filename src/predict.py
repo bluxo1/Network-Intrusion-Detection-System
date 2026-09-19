@@ -59,11 +59,12 @@ class Predictor:
             self.metadata = json.load(f)
         self.class_names: List[str] = self.metadata.get("class_names", CLASS_NAMES)
 
-        # ``weights_only=False`` because our checkpoint stores plain Python
-        # metadata (ints/lists) alongside the tensors. The files are produced by
-        # our own trainer, so this is safe.
-        bin_ckpt = torch.load(abspath(art["binary_model"]), map_location=self.device, weights_only=False)
-        mc_ckpt = torch.load(abspath(art["multiclass_model"]), map_location=self.device, weights_only=False)
+        # ``weights_only=True`` (the safe unpickler): our checkpoints hold only
+        # tensors plus plain Python metadata (ints/lists/str), all of which the
+        # restricted loader accepts. This closes the arbitrary-code-execution
+        # path a tampered ``.pt`` file would otherwise open at load time.
+        bin_ckpt = torch.load(abspath(art["binary_model"]), map_location=self.device, weights_only=True)
+        mc_ckpt = torch.load(abspath(art["multiclass_model"]), map_location=self.device, weights_only=True)
         self.binary_model = _build_from_checkpoint(bin_ckpt, self.device)
         self.multiclass_model = _build_from_checkpoint(mc_ckpt, self.device)
 
