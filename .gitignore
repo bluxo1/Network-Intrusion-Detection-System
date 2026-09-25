@@ -10,11 +10,12 @@ env/
 data/*.txt
 data/processed/
 
-# Ignore generated reports, but keep the two the README depends on: the
-# confusion matrix it embeds and the metrics it quotes as headline results.
+# Ignore generated reports, but keep the reviewed evaluation artifacts.
 reports/*
 !reports/confusion_matrix.png
 !reports/metrics.json
+!reports/r2l_diagnostics.json
+!reports/r2l_diagnostics.md
 
 # Trained artifacts are small (~400 KB total) and are committed on purpose so
 # the app can be deployed straight from this repo without a training step.

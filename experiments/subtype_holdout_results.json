@@ -1,0 +1,172 @@
+{
+  "protocol": {
+    "data": "KDDTrain+ only; KDDTest+ and deployed artifacts not read",
+    "split": "For each prespecified fold, all held-out subtype rows to evaluation; remaining rows 15% stratified evaluation, then 15% stratified validation, remainder fit; seed 42",
+    "preprocessing": "StandardScaler and OneHotEncoder fit on fit rows only",
+    "baseline": "Repo BinaryClassifier and src.train train_loop (Adam, StepLR, early stopping, BCE pos_weight), fit from scratch per fold",
+    "candidate": "HistGradientBoostingClassifier(loss=log_loss, max_iter=100, max_leaf_nodes=31, learning_rate=0.1, l2_regularization=1.0, early_stopping=False, random_state=42); R2L sample weight 10, others 1",
+    "threshold": "Maximize validation F2 under <=1% normal FAR, independently per gate; no held-out subtype row used"
+  },
+  "folds": {
+    "holdout_three_rare": {
+      "heldout_subtypes": [
+        "guess_passwd",
+        "warezmaster",
+        "imap"
+      ],
+      "heldout_counts": {
+        "guess_passwd": 53,
+        "warezmaster": 20,
+        "imap": 11
+      },
+      "split_rows": {
+        "fit": 90954,
+        "validation": 16051,
+        "evaluation_known": 18884,
+        "evaluation_heldout": 84
+      },
+      "validation_known_only": {
+        "baseline_mlp": {
+          "threshold": 0.16301874816417694,
+          "attack_recall": 0.9982585398526457,
+          "heldout_r2l_recall": null,
+          "known_attack_recall": 0.9982585398526457,
+          "normal_false_alarm_rate": 0.006172839506172839,
+          "attack_detected": 7452,
+          "attack_total": 7465,
+          "heldout_r2l_detected": 0,
+          "heldout_r2l_total": 0,
+          "known_attack_detected": 7452,
+          "known_attack_total": 7465,
+          "normal_false_alarms": 53,
+          "normal_total": 8586
+        },
+        "r2l_weighted_hgb": {
+          "threshold": 0.27042132786894924,
+          "attack_recall": 0.9995981245813798,
+          "heldout_r2l_recall": null,
+          "known_attack_recall": 0.9995981245813798,
+          "normal_false_alarm_rate": 0.00197996738877242,
+          "attack_detected": 7462,
+          "attack_total": 7465,
+          "heldout_r2l_detected": 0,
+          "heldout_r2l_total": 0,
+          "known_attack_detected": 7462,
+          "known_attack_total": 7465,
+          "normal_false_alarms": 17,
+          "normal_total": 8586
+        }
+      },
+      "evaluation": {
+        "baseline_mlp": {
+          "threshold": 0.16301874816417694,
+          "attack_recall": 0.9897360703812317,
+          "heldout_r2l_recall": 0.11904761904761904,
+          "known_attack_recall": 0.9980642222728308,
+          "normal_false_alarm_rate": 0.00593941793704217,
+          "attack_detected": 8775,
+          "attack_total": 8866,
+          "heldout_r2l_detected": 10,
+          "heldout_r2l_total": 84,
+          "known_attack_detected": 8765,
+          "known_attack_total": 8782,
+          "normal_false_alarms": 60,
+          "normal_total": 10102
+        },
+        "r2l_weighted_hgb": {
+          "threshold": 0.27042132786894924,
+          "attack_recall": 0.9926686217008798,
+          "heldout_r2l_recall": 0.3333333333333333,
+          "known_attack_recall": 0.998975176497381,
+          "normal_false_alarm_rate": 0.0012868738863591367,
+          "attack_detected": 8801,
+          "attack_total": 8866,
+          "heldout_r2l_detected": 28,
+          "heldout_r2l_total": 84,
+          "known_attack_detected": 8773,
+          "known_attack_total": 8782,
+          "normal_false_alarms": 13,
+          "normal_total": 10102
+        }
+      }
+    },
+    "holdout_warezclient": {
+      "heldout_subtypes": [
+        "warezclient"
+      ],
+      "heldout_counts": {
+        "warezclient": 890
+      },
+      "split_rows": {
+        "fit": 90372,
+        "validation": 15948,
+        "evaluation_known": 18763,
+        "evaluation_heldout": 890
+      },
+      "validation_known_only": {
+        "baseline_mlp": {
+          "threshold": 0.16149018704891205,
+          "attack_recall": 0.9989133387666395,
+          "heldout_r2l_recall": null,
+          "known_attack_recall": 0.9989133387666395,
+          "normal_false_alarm_rate": 0.0031446540880503146,
+          "attack_detected": 7354,
+          "attack_total": 7362,
+          "heldout_r2l_detected": 0,
+          "heldout_r2l_total": 0,
+          "known_attack_detected": 7354,
+          "known_attack_total": 7362,
+          "normal_false_alarms": 27,
+          "normal_total": 8586
+        },
+        "r2l_weighted_hgb": {
+          "threshold": 0.3198951425963396,
+          "attack_recall": 0.99986416734583,
+          "heldout_r2l_recall": null,
+          "known_attack_recall": 0.99986416734583,
+          "normal_false_alarm_rate": 0.000815280689494526,
+          "attack_detected": 7361,
+          "attack_total": 7362,
+          "heldout_r2l_detected": 0,
+          "heldout_r2l_total": 0,
+          "known_attack_detected": 7361,
+          "known_attack_total": 7362,
+          "normal_false_alarms": 7,
+          "normal_total": 8586
+        }
+      },
+      "evaluation": {
+        "baseline_mlp": {
+          "threshold": 0.16149018704891205,
+          "attack_recall": 0.9075489477541618,
+          "heldout_r2l_recall": 0.028089887640449437,
+          "known_attack_recall": 0.9979217180464149,
+          "normal_false_alarm_rate": 0.0035636507622253018,
+          "attack_detected": 8668,
+          "attack_total": 9551,
+          "heldout_r2l_detected": 25,
+          "heldout_r2l_total": 890,
+          "known_attack_detected": 8643,
+          "known_attack_total": 8661,
+          "normal_false_alarms": 36,
+          "normal_total": 10102
+        },
+        "r2l_weighted_hgb": {
+          "threshold": 0.3198951425963396,
+          "attack_recall": 0.9058737304994241,
+          "heldout_r2l_recall": 0.0,
+          "known_attack_recall": 0.9989608590232075,
+          "normal_false_alarm_rate": 0.001088893288457731,
+          "attack_detected": 8652,
+          "attack_total": 9551,
+          "heldout_r2l_detected": 0,
+          "heldout_r2l_total": 890,
+          "known_attack_detected": 8652,
+          "known_attack_total": 8661,
+          "normal_false_alarms": 11,
+          "normal_total": 10102
+        }
+      }
+    }
+  }
+}

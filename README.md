@@ -3,7 +3,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.13-EE4C2C?logo=pytorch&logoColor=white)
 ![Flask](https://img.shields.io/badge/Flask-3.1-000000?logo=flask&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-12%2F12%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-13%2F13%20passing-brightgreen)
 ![Validation](https://img.shields.io/badge/validation-99.6%25-brightgreen)
 ![KDDTest+](https://img.shields.io/badge/KDDTest%2B-80.0%25-yellow)
 
@@ -339,6 +339,26 @@ the aggregate accuracy is 80.0%.
 > unseen R2L attacks or modern live traffic.
 
 ![Confusion matrix](reports/confusion_matrix.png)
+
+### Investigating the R2L misses
+
+Run `python -m src.r2l_diagnostics` after preprocessing and training to
+regenerate the [R2L error report](reports/r2l_diagnostics.md) and its
+[machine-readable results](reports/r2l_diagnostics.json). The report separates
+binary-gate misses from attack-family mistakes and shows results by raw attack
+subtype. It is **evaluation only**: do not select a model or threshold using
+KDDTest+ outcomes.
+
+The [R2L-weighted gate experiment](experiments/r2l_weighted_gate.py) compares
+a candidate binary model with the deployed gate using the existing training
+split. Its [results](experiments/r2l_weighted_gate_results.json) show a modest
+KDDTest+ R2L recall improvement (14.4% to 17.5%) with the same multiclass
+model. The candidate is not deployed; most R2L attacks are still missed, and
+the [held-out subtype check](experiments/subtype_holdout_results.json) shows
+why it should not be promoted: with `warezclient` excluded from fitting and
+threshold selection, the candidate detected 0 of 890 examples (the freshly
+trained current gate detected 25). The
+[reproducible check](experiments/subtype_holdout.py) uses KDDTrain+ only.
 
 ## 🏭 Production notes
 

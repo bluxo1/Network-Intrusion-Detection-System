@@ -1,0 +1,72 @@
+{
+  "protocol": {
+    "training": "KDDTrain+ 85% stratified split; preprocessors fit on training only",
+    "selection": "KDDTrain+ 15% validation; maximize F2 with FAR <= 1%",
+    "final_evaluation": "KDDTest+ after candidate/threshold locked; rerun for layered metrics without selection changes",
+    "candidate": "HistGradientBoostingClassifier(loss=log_loss, max_iter=100, max_leaf_nodes=31, learning_rate=0.1, l2_regularization=1.0, early_stopping=False, random_state=42); R2L sample weight 10, all other rows 1"
+  },
+  "validation": {
+    "deployed_mlp": {
+      "threshold": 0.24880307912826538,
+      "attack_recall": 0.9979531498749147,
+      "r2l_gate_recall": 0.9664429530201343,
+      "r2l_layered_recall": 0.9664429530201343,
+      "five_class_accuracy": 0.9957133784928027,
+      "normal_false_alarm_rate": 0.00593941793704217,
+      "true_attacks": 8794,
+      "detected_attacks": 8776,
+      "true_r2l": 149,
+      "detected_r2l": 144,
+      "correct_r2l": 144,
+      "true_normal": 10102,
+      "false_alarms": 60
+    },
+    "r2l_weighted_hgb": {
+      "threshold": 0.26980852351785267,
+      "attack_recall": 0.9994314305208096,
+      "r2l_gate_recall": 1.0,
+      "r2l_layered_recall": 1.0,
+      "five_class_accuracy": 0.9986240474174428,
+      "normal_false_alarm_rate": 0.0016828350821619482,
+      "true_attacks": 8794,
+      "detected_attacks": 8789,
+      "true_r2l": 149,
+      "detected_r2l": 149,
+      "correct_r2l": 149,
+      "true_normal": 10102,
+      "false_alarms": 17
+    }
+  },
+  "kddtest_plus": {
+    "deployed_mlp": {
+      "threshold": 0.24880307912826538,
+      "attack_recall": 0.7017844619340762,
+      "r2l_gate_recall": 0.15736568457538994,
+      "r2l_layered_recall": 0.1435008665511265,
+      "five_class_accuracy": 0.8000798438608943,
+      "normal_false_alarm_rate": 0.030789825970548863,
+      "true_attacks": 12833,
+      "detected_attacks": 9006,
+      "true_r2l": 2885,
+      "detected_r2l": 454,
+      "correct_r2l": 414,
+      "true_normal": 9711,
+      "false_alarms": 299
+    },
+    "r2l_weighted_hgb": {
+      "threshold": 0.26980852351785267,
+      "attack_recall": 0.717135510013247,
+      "r2l_gate_recall": 0.1875216637781629,
+      "r2l_layered_recall": 0.17504332755632582,
+      "five_class_accuracy": 0.8081973030518098,
+      "normal_false_alarm_rate": 0.029245185871691896,
+      "true_attacks": 12833,
+      "detected_attacks": 9203,
+      "true_r2l": 2885,
+      "detected_r2l": 541,
+      "correct_r2l": 505,
+      "true_normal": 9711,
+      "false_alarms": 284
+    }
+  }
+}
