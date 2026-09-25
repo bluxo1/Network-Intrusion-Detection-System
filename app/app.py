@@ -13,10 +13,10 @@ Production:    gunicorn -w 4 -b 0.0.0.0:5000 app.app:app
 
 Security (opt-in, off by default so local demos keep working)
 -------------------------------------------------------------
-* NIDS_API_KEY   - if set, /api/predict requires an ``X-API-Key`` header that
-                   matches it (constant-time compared). Unset => open, as before.
+* NIDS_API_KEY   - if set, API requests require ``X-API-Key`` and the browser
+                   form requires HTTP Basic (user ``nids``, password = key).
 * NIDS_RATE_LIMIT- max requests/minute/client-IP for the inference endpoints.
-                   Defaults to 120; set to 0 to disable. Skipped under TESTING.
+                   Defaults to 120 per worker; set to 0 to disable.
 """
 
 import hmac
@@ -26,6 +26,7 @@ import os
 import sys
 import time
 from collections import defaultdict, deque
+from threading import Lock
 
 # Make the project root importable whether launched as `python app/app.py`
 # or `gunicorn app.app:app` from the repo root.
@@ -33,18 +34,20 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from flask import Flask, jsonify, render_template, request  # noqa: E402
+from flask import Flask, Response, jsonify, render_template, request  # noqa: E402
 
 from app.preprocessor import build_field_specs, parse_form  # noqa: E402
 from app.predictor import get_predictor, missing_artifacts, models_available  # noqa: E402
 from src.config import CONFIG, abspath  # noqa: E402
 from src.schema import CATEGORICAL_COLUMNS, CLASS_NAMES  # noqa: E402
+from src.predict import InputValidationError  # noqa: E402
 
 app = Flask(
     __name__,
     template_folder=os.path.join(PROJECT_ROOT, "templates"),
     static_folder=os.path.join(PROJECT_ROOT, "static"),
 )
+app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
 
 logger = logging.getLogger("nids.app")
 
@@ -58,40 +61,70 @@ except ValueError:
     RATE_LIMIT = 120
 _RATE_WINDOW_SEC = 60.0
 _hits: "defaultdict[str, deque]" = defaultdict(deque)
+_hits_lock = Lock()
+_last_prune = 0.0
+_MAX_CLIENTS = 10_000
 
 
 def _client_ip() -> str:
-    """Best-effort client IP; trusts the first X-Forwarded-For hop if present."""
-    fwd = request.headers.get("X-Forwarded-For", "")
-    if fwd:
-        return fwd.split(",")[0].strip()
+    """Use the WSGI peer address; untrusted forwarding headers are ignored."""
     return request.remote_addr or "unknown"
 
 
 def _rate_limited(ip: str) -> bool:
-    """Fixed-window-per-IP limiter. No-op under TESTING or when disabled."""
+    """Bounded per-worker sliding-window limiter."""
     if RATE_LIMIT <= 0 or app.config.get("TESTING"):
         return False
+    global _last_prune
     now = time.monotonic()
-    dq = _hits[ip]
-    while dq and now - dq[0] > _RATE_WINDOW_SEC:
-        dq.popleft()
-    if len(dq) >= RATE_LIMIT:
-        return True
-    dq.append(now)
-    return False
+    with _hits_lock:
+        if now - _last_prune >= _RATE_WINDOW_SEC:
+            for key, hits in list(_hits.items()):
+                while hits and now - hits[0] >= _RATE_WINDOW_SEC:
+                    hits.popleft()
+                if not hits:
+                    del _hits[key]
+            _last_prune = now
+        if ip not in _hits and len(_hits) >= _MAX_CLIENTS:
+            return True
+        hits = _hits[ip]
+        while hits and now - hits[0] >= _RATE_WINDOW_SEC:
+            hits.popleft()
+        if len(hits) >= RATE_LIMIT:
+            return True
+        hits.append(now)
+        return False
 
 
-def _auth_ok() -> bool:
-    """True if auth is disabled, or the presented X-API-Key matches (constant-time)."""
+def _auth_ok(allow_basic: bool = False) -> bool:
+    """Check the API header or, for browser routes, HTTP Basic credentials."""
     if not API_KEY:
         return True
+
+    def matches_key(value: str) -> bool:
+        try:
+            return hmac.compare_digest(value.encode("utf-8"), API_KEY.encode("utf-8"))
+        except UnicodeError:
+            return False
+
     presented = request.headers.get("X-API-Key", "")
-    return hmac.compare_digest(presented, API_KEY)
+    if matches_key(presented):
+        return True
+    if not allow_basic:
+        return False
+    auth = request.authorization
+    return bool(
+        auth and auth.type == "basic" and auth.username == "nids"
+        and matches_key(auth.password or "")
+    )
+
+
+def _browser_unauthorized() -> Response:
+    return Response("Authentication required", 401, {"WWW-Authenticate": 'Basic realm="NIDS"'})
 
 # Per-class colour + emoji used for result styling in the templates.
 CLASS_STYLE = {
-    "Normal": {"color": "#1a9850", "emoji": "\U0001F7E2", "desc": "Benign traffic - no threat detected."},
+    "Normal": {"color": "#1a9850", "emoji": "\U0001F7E2", "desc": "Classified as Normal; the model can miss attacks."},
     "DOS": {"color": "#d73027", "emoji": "\U0001F534", "desc": "Denial of Service - flooding to exhaust resources."},
     "PROBE": {"color": "#f6c343", "emoji": "\U0001F7E1", "desc": "Probe / scan - reconnaissance of hosts and ports."},
     "R2L": {"color": "#fc8d59", "emoji": "\U0001F7E0", "desc": "Remote-to-Local - unauthorized remote access attempt."},
@@ -125,6 +158,10 @@ def load_metadata() -> dict:
 
 @app.route("/", methods=["GET"])
 def index():
+    if _rate_limited(_client_ip()):
+        return Response("Too many requests", 429)
+    if not _auth_ok(allow_basic=True):
+        return _browser_unauthorized()
     metadata = load_metadata()
     groups = build_field_specs(metadata)
     return render_template(
@@ -142,6 +179,8 @@ def predict():
             "result.html", error="Too many requests. Please slow down and try again.",
             class_style=CLASS_STYLE,
         ), 429
+    if not _auth_ok(allow_basic=True):
+        return _browser_unauthorized()
 
     if not models_available():
         return render_template(
@@ -154,6 +193,8 @@ def predict():
     features = parse_form(request.form)
     try:
         result = get_predictor().predict_features(features)
+    except InputValidationError as exc:
+        return render_template("result.html", error=str(exc), class_style=CLASS_STYLE), 400
     except Exception:  # noqa: BLE001 - log detail server-side, stay generic to the client
         logger.exception("prediction failed on /predict")
         return render_template("result.html",
@@ -175,19 +216,23 @@ def api_predict():
     if not _auth_ok():
         return jsonify({"error": "unauthorized"}), 401
 
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "invalid_payload", "detail": "expected a JSON object"}), 400
+    features = payload.get("features", payload)
+    if not isinstance(features, dict):
+        return jsonify({"error": "invalid_payload", "detail": "expected a JSON object of features"}), 400
+
     if not models_available():
         return jsonify({
             "error": "models_not_trained",
             "missing_artifacts": missing_artifacts(),
         }), 503
 
-    payload = request.get_json(silent=True) or {}
-    features = payload.get("features", payload)
-    if not isinstance(features, dict):
-        return jsonify({"error": "invalid_payload", "detail": "expected a JSON object of features"}), 400
-
     try:
         result = get_predictor().predict_features(features)
+    except InputValidationError as exc:
+        return jsonify({"error": "invalid_features", "detail": str(exc)}), 400
     except Exception:  # noqa: BLE001 - log detail server-side, stay generic to the client
         logger.exception("prediction failed on /api/predict")
         return jsonify({"error": "prediction_failed"}), 500
@@ -196,11 +241,23 @@ def api_predict():
 
 @app.route("/health", methods=["GET"])
 def health():
+    missing = missing_artifacts()
+    if missing:
+        return jsonify({
+            "status": "degraded", "models_ready": False,
+            "missing_artifacts": missing, "classes": CLASS_NAMES,
+        }), 503
+    try:
+        get_predictor()
+    except Exception:
+        logger.exception("model readiness check failed")
+        return jsonify({
+            "status": "degraded", "models_ready": False,
+            "missing_artifacts": [], "classes": CLASS_NAMES,
+        }), 503
     return jsonify({
-        "status": "ok",
-        "models_ready": models_available(),
-        "missing_artifacts": missing_artifacts(),
-        "classes": CLASS_NAMES,
+        "status": "ok", "models_ready": True,
+        "missing_artifacts": [], "classes": CLASS_NAMES,
     })
 
 
@@ -208,4 +265,4 @@ if __name__ == "__main__":
     # Dev server. In production use gunicorn (see the module docstring / README).
     port = int(os.environ.get("PORT", "5000"))
     debug = os.environ.get("FLASK_DEBUG", "0") == "1"
-    app.run(host="0.0.0.0", port=port, debug=debug)
+    app.run(host=os.environ.get("HOST", "127.0.0.1"), port=port, debug=debug)

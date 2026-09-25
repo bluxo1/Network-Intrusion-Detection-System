@@ -310,5 +310,13 @@
       "SF",
       "SH"
     ]
+  },
+  "preprocessing_version": 2,
+  "train_rows": 107077,
+  "validation_rows": 18896,
+  "attack_threshold": 0.24880307912826538,
+  "threshold_selection": {
+    "metric": "F2",
+    "max_validation_false_alarm_rate": 0.01
   }
 }

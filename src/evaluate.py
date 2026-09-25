@@ -32,7 +32,6 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
-from sklearn.model_selection import train_test_split
 
 from .config import CONFIG, abspath
 from .predict import Predictor
@@ -45,17 +44,11 @@ def _load_arrays():
         raise FileNotFoundError(
             f"{npz} not found. Run `python -m src.preprocess` (and `python -m src.train`) first."
         )
-    return np.load(npz)
-
-
-def _val_split(X_train, y_train, yb_train):
-    """Reconstruct the exact stratified validation split used by src/train.py."""
-    tcfg = CONFIG["training"]
-    idx = np.arange(len(X_train))
-    _, val_idx = train_test_split(
-        idx, test_size=tcfg["val_split"], random_state=tcfg["seed"], stratify=y_train
-    )
-    return X_train[val_idx], y_train[val_idx], yb_train[val_idx]
+    data = np.load(npz)
+    if "X_val" not in data.files:
+        data.close()
+        raise ValueError("Processed arrays predate the validation fix. Run `python -m src.train` first.")
+    return data
 
 
 def _binary_metrics(yb, is_attack, bin_prob):
@@ -134,9 +127,11 @@ def main() -> None:
     data = _load_arrays()
     predictor = Predictor()
 
-    # In-distribution validation split (the 98%+ target regime).
-    Xv, yv, ybv = _val_split(data["X_train"], data["y_train"], data["yb_train"])
-    val_metrics = evaluate_split(predictor, Xv, yv, ybv, "IN-DISTRIBUTION VALIDATION (15% of KDDTrain+)")
+    # In-distribution validation was transformed without fitting on its rows.
+    val_metrics = evaluate_split(
+        predictor, data["X_val"], data["y_val"], data["yb_val"],
+        "IN-DISTRIBUTION VALIDATION (15% of KDDTrain+)",
+    )
 
     # Official KDDTest+ (cross-distribution generalisation).
     reports_dir = abspath("reports")

@@ -5,9 +5,9 @@ Responsibilities
 ----------------
 1. Read the raw ``KDDTrain+.txt`` / ``KDDTest+.txt`` files.
 2. Map the raw attack label to the 5 canonical classes.
-3. One-hot encode the categorical columns and z-score scale the numeric ones,
-   fitting **only on the training split** and reusing those fitted objects
-   everywhere else (train/val/test/inference) so the pipeline is identical.
+3. Split KDDTrain+ before fitting. One-hot encode the categorical columns and
+   z-score scale the numeric ones using only the training split, then reuse
+   those objects for validation/test/inference.
 4. Persist the fitted encoder, scaler and a metadata JSON so the Flask app can
    reproduce the exact same transformation at inference time.
 
@@ -22,6 +22,7 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.model_selection import train_test_split
 
 from .config import CONFIG, abspath
 from .schema import (
@@ -140,17 +141,31 @@ def run() -> None:
     print("[preprocess] class distribution (train):")
     print(train_df["class"].value_counts().to_string())
 
-    scaler, encoder, metadata = fit_preprocessors(train_df)
+    # Validation must not influence the fitted means, variances or vocabulary.
+    labels = _class_to_index(train_df["class"])
+    train_idx, val_idx = train_test_split(
+        np.arange(len(train_df)), test_size=CONFIG["training"]["val_split"],
+        random_state=CONFIG["training"]["seed"], stratify=labels,
+    )
+    fit_df = train_df.iloc[train_idx]
+    val_df = train_df.iloc[val_idx]
+    scaler, encoder, metadata = fit_preprocessors(fit_df)
+    metadata["preprocessing_version"] = 2
+    metadata["train_rows"] = len(fit_df)
+    metadata["validation_rows"] = len(val_df)
     print(f"[preprocess] encoded input dimension = {metadata['input_dim']}")
 
-    X_train = transform(train_df, scaler, encoder)
+    X_train = transform(fit_df, scaler, encoder)
+    X_val = transform(val_df, scaler, encoder)
     X_test = transform(test_df, scaler, encoder)
 
     # Multi-class integer targets (0..4).
-    y_train = _class_to_index(train_df["class"])
+    y_train = labels[train_idx]
+    y_val = labels[val_idx]
     y_test = _class_to_index(test_df["class"])
     # Binary targets: 0 = Normal, 1 = Attack.
     yb_train = (y_train != 0).astype(np.float32)
+    yb_val = (y_val != 0).astype(np.float32)
     yb_test = (y_test != 0).astype(np.float32)
 
     # ---- persist artifacts -------------------------------------------------
@@ -172,6 +187,9 @@ def run() -> None:
         X_train=X_train,
         y_train=y_train,
         yb_train=yb_train,
+        X_val=X_val,
+        y_val=y_val,
+        yb_val=yb_val,
         X_test=X_test,
         y_test=y_test,
         yb_test=yb_test,

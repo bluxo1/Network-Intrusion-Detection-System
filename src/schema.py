@@ -67,6 +67,11 @@ CATEGORICAL_COLUMNS = ["protocol_type", "service", "flag"]
 # Everything else is numeric.
 NUMERIC_COLUMNS = [c for c in FEATURE_COLUMNS if c not in CATEGORICAL_COLUMNS]
 
+# NSL-KDD indicator fields. su_attempted uses 0, 1, or 2 in the dataset.
+BINARY_FLAG_FEATURES = {
+    "land", "logged_in", "root_shell", "is_host_login", "is_guest_login",
+}
+
 # ---------------------------------------------------------------------------
 # Canonical 5-class taxonomy.
 # Index positions are fixed and used everywhere as the label encoding:

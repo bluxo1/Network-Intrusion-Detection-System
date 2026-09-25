@@ -11,7 +11,7 @@ by the predictor, so there is a single preprocessing implementation.
 
 from typing import Dict, List
 
-from src.schema import CATEGORICAL_COLUMNS, FEATURE_COLUMNS
+from src.schema import BINARY_FLAG_FEATURES, CATEGORICAL_COLUMNS, FEATURE_COLUMNS
 
 # --- Feature groups mirror the NSL-KDD documentation and the project spec ---
 FEATURE_GROUPS: Dict[str, List[str]] = {
@@ -34,11 +34,6 @@ FEATURE_GROUPS: Dict[str, List[str]] = {
         "dst_host_srv_diff_host_rate", "dst_host_serror_rate",
         "dst_host_srv_serror_rate", "dst_host_rerror_rate", "dst_host_srv_rerror_rate",
     ],
-}
-
-# Binary 0/1 flag features (rendered with a 0/1 constraint).
-BINARY_FLAG_FEATURES = {
-    "land", "logged_in", "root_shell", "su_attempted", "is_host_login", "is_guest_login",
 }
 
 # Default values describing a typical benign HTTP connection. Pre-filling the
@@ -84,6 +79,8 @@ def build_field_specs(metadata: dict) -> List[dict]:
                 spec.update(type="number", step="0.01", min="0", max="1")
             elif feat in BINARY_FLAG_FEATURES:
                 spec.update(type="number", step="1", min="0", max="1")
+            elif feat == "su_attempted":
+                spec.update(type="number", step="1", min="0", max="2")
             else:
                 spec.update(type="number", step="1", min="0")
             fields.append(spec)

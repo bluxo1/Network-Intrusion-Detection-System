@@ -3,13 +3,14 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.13-EE4C2C?logo=pytorch&logoColor=white)
 ![Flask](https://img.shields.io/badge/Flask-3.1-000000?logo=flask&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-7%2F7%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-12%2F12%20passing-brightgreen)
 ![Validation](https://img.shields.io/badge/validation-99.6%25-brightgreen)
-![KDDTest+](https://img.shields.io/badge/KDDTest%2B-80.3%25-yellow)
+![KDDTest+](https://img.shields.io/badge/KDDTest%2B-80.0%25-yellow)
 
-A production-ready **Network Intrusion Detection System** built with **PyTorch**
-and served as a live **Flask** web app. It classifies network traffic into five
-classes using the **NSL-KDD** dataset (41 features):
+An educational **network intrusion classification demo** built with **PyTorch**
+and served as a **Flask** web app. It classifies 41-feature **NSL-KDD** records
+into five classes. It does not capture live network traffic or provide a
+validated production security control:
 
 | Class | Meaning |
 |-------|---------|
@@ -233,14 +234,15 @@ Other routes: `GET /` (form), `POST /predict` (form submission), `GET /health`
 
 ### 🔒 Securing the endpoints
 
-Both hardening features are **opt-in and off by default**, so local use and the
-test-suite are unaffected. Enable them via environment variables before exposing
-the app on a network:
+The API key is optional for local demos. Set it before exposing the app on a
+network. The built-in request limit defaults to 120 requests per minute per
+worker; it is a local safeguard, not a replacement for a limit at the network
+edge:
 
 | Env var | Effect | Default |
 |---------|--------|---------|
-| `NIDS_API_KEY` | When set, `POST /api/predict` requires a matching `X-API-Key` header (constant-time compared). | unset → open |
-| `NIDS_RATE_LIMIT` | Max requests/minute per client IP on the inference routes. `0` disables. | `120` |
+| `NIDS_API_KEY` | When set, the API requires `X-API-Key`. The browser form requires HTTP Basic with user `nids` and the key as password. | unset → open |
+| `NIDS_RATE_LIMIT` | Max requests/minute per peer IP and worker on the form and inference routes. `0` disables. | `120` |
 
 ```bash
 NIDS_API_KEY=your-secret NIDS_RATE_LIMIT=60 python app/app.py
@@ -250,8 +252,14 @@ curl -X POST http://localhost:5000/api/predict \
   -d '{"features": {"protocol_type":"tcp","service":"http","flag":"SF"}}'
 ```
 
-Model artifacts are loaded with `torch.load(..., weights_only=True)`, so a
-tampered `.pt` file cannot execute arbitrary code at load time.
+Model checkpoints are loaded with `torch.load(..., weights_only=True)`.
+The `.pkl` preprocessing artifacts use `joblib` and must come from a trusted
+source; loading an untrusted pickle can execute code.
+
+Invalid JSON shapes and feature values return HTTP 400. The app ignores
+client-supplied `X-Forwarded-For`; configure trusted proxy handling at your
+deployment boundary if you need the original client IP. Use TLS when sending
+the API key or browser Basic credentials.
 
 ---
 
@@ -268,13 +276,15 @@ layer only, where it stabilises training against that imbalance.
 
 **Training** — Adam (`lr=1e-3`, weight decay `1e-4`), `StepLR` decay (×0.5
 every 15 epochs), early stopping on validation loss (patience 10), stratified
-85/15 train/val split of KDDTrain+, batch size 256, seed 42. All knobs live in
-[`config.yaml`](config.yaml).
+85/15 train/val split of KDDTrain+, batch size 256, seed 42. The scaler and
+encoder are fitted only on the 85% training partition. The attack threshold is
+selected from validation predictions by maximising F2 under a 1% validation
+false-alarm ceiling. Training and threshold selection do not read KDDTest+;
+the test file is used for evaluation. All knobs live
+in [`config.yaml`](config.yaml).
 
-> **Reproducibility** — with the pinned dependency versions the binary model
-> retrains bit-identically. The multi-class model varies in the third decimal,
-> confined to R2L/U2R, where a handful of sample flips move F1 by whole points
-> because those classes have only 8 and 149 validation examples respectively.
+> **Rare-class uncertainty** — validation has only 8 U2R and 149 R2L examples.
+> Small changes in their predictions can move per-class F1 substantially.
 
 ---
 
@@ -289,7 +299,7 @@ regimes (regenerate anytime with `python -m src.evaluate` → `reports/metrics.j
 |---------------------------|-------|
 | Accuracy                  | **99.6%** |
 | Detection rate (recall)   | **99.8%** |
-| False-alarm rate          | **0.5%**  |
+| False-alarm rate          | **0.6%**  |
 | ROC-AUC                   | 0.9999 |
 
 Multi-class accuracy: **99.6%** (per-class F1 ≈ 1.00 for Normal/DOS/PROBE).
@@ -298,41 +308,35 @@ Multi-class accuracy: **99.6%** (per-class F1 ≈ 1.00 for Normal/DOS/PROBE).
 
 | Binary (Normal vs Attack) | Value |
 |---------------------------|-------|
-| Accuracy                  | 80.3% |
-| Detection rate (recall)   | 68.7% |
-| Precision                 | 95.4% |
-| False-alarm rate          | 4.4%  |
-| ROC-AUC                   | 0.9362 |
+| Accuracy                  | 81.7% |
+| Detection rate (recall)   | 70.2% |
+| Precision                 | 96.8% |
+| False-alarm rate          | 3.1%  |
+| ROC-AUC                   | 0.9399 |
 
-Multi-class accuracy: 78.5%.
+Multi-class accuracy: 80.0%.
 
 ### Per-class F1 — where the generalisation gap actually lives
 
 | Class | Validation F1 | KDDTest+ F1 | Δ |
 |-------|--------------:|------------:|--:|
-| 🟢 Normal | 0.997 | 0.807 | −0.190 |
-| 🔴 DOS    | 0.999 | 0.906 | −0.093 |
-| 🟡 PROBE  | 0.991 | 0.716 | −0.275 |
-| 🟠 R2L    | 0.917 | **0.196** | **−0.721** |
-| 🟣 U2R    | 0.778 | 0.474 | −0.304 |
+| 🟢 Normal | 0.996 | 0.820 | −0.176 |
+| 🔴 DOS    | 0.999 | 0.915 | −0.084 |
+| 🟡 PROBE  | 0.991 | 0.750 | −0.241 |
+| 🟠 R2L    | 0.892 | **0.249** | **−0.643** |
+| 🟣 U2R    | 0.737 | 0.529 | −0.208 |
 
-**R2L is the whole story.** Its recall collapses from **94.0% → 11.0%** while
-precision stays high at 94.1% — the model has not become *imprecise* about R2L,
-it has gone *blind* to it. R2L attacks impersonate legitimate sessions
-(password guessing, malicious file transfer), so their KDDTest+ variants share
-almost no surface structure with the 995 examples in training, and the model
-files them as Normal. DOS and PROBE, whose signatures are structural rather
-than behavioural, degrade far more gracefully.
+**R2L has the largest generalisation gap.** Recall falls from **96.6% to 14.4%**
+while precision on the few predicted R2L cases is 95.4%. The model labels 2,431
+of the 2,885 R2L test records Normal. This is a material miss rate even though
+the aggregate accuracy is 80.0%.
 
-> **Why the gap?** NSL-KDD's test set is deliberately constructed with attack
-> variants (especially R2L/U2R) that never appear in training, so it measures
-> generalisation to *unseen* attacks. ~78–80% on KDDTest+ is consistent with
-> published results for this class of model — the 98%+ figure is the
-> in-distribution regime. `inference.attack_threshold` is set to **0.35** (down
-> from the neutral 0.5) to favour detection recall; lower it further to trade
-> more false alarms for more recall. On the rare R2L/U2R classes the threshold
-> barely moves the needle — those gains are dataset-limited and would need
-> retraining (e.g. resampling / focal loss), not a threshold change.
+> **Why the gap?** KDDTest+ contains attack variants absent from training.
+> The 99.6% validation accuracy measures performance on held-out rows from the
+> same dataset, while the 80.0% test accuracy measures this harder shift. The
+> current validation-selected threshold is about 0.249. Changing the threshold
+> trades recall against false alarms; it does not make this model reliable for
+> unseen R2L attacks or modern live traffic.
 
 ![Confusion matrix](reports/confusion_matrix.png)
 
@@ -342,13 +346,16 @@ than behavioural, degrade far more gracefully.
   `gunicorn -w 4 -b 0.0.0.0:5000 app.app:app`.
 - **Windows** - gunicorn imports `fcntl` and cannot run there.
   Use waitress instead: `python -m waitress --port=5000 app.app:app`.
+- The Flask development server binds to `127.0.0.1` by default. Set `HOST`
+  explicitly only when you need another interface.
 - Models load **once per worker** (cached singleton) for fast inference.
 - `GET /health` is suitable for uptime and load-balancer probes.
-- Lower `inference.attack_threshold` in `config.yaml` to trade false alarms for
-  higher detection recall.
-- Before exposing the app, set `NIDS_API_KEY` and (optionally) `NIDS_RATE_LIMIT`
-  — see [Securing the endpoints](#-securing-the-endpoints). The endpoints are
-  otherwise unauthenticated.
+- `GET /health` returns 503 if model files are missing or cannot be loaded.
+- Set `inference.attack_threshold` in `config.yaml` to override the saved
+  validation-selected threshold when exploring recall/false-alarm tradeoffs.
+- Before exposing the app, set `NIDS_API_KEY` and an edge request limit — see
+  [Securing the endpoints](#-securing-the-endpoints). The app is an NSL-KDD
+  research demo and must not be used as the sole means of intrusion detection.
 
 ---
 
@@ -406,10 +413,10 @@ the NSL-KDD archive manually and drop `KDDTrain+.txt` and `KDDTest+.txt` into
 <details>
 <summary><strong>Changed <code>config.yaml</code> but nothing happened</strong></summary>
 
-`src/train.py` reuses the cached `data/processed/dataset.npz` and only re-runs
-preprocessing when that file is **missing**. If you changed anything affecting
-encoding or scaling, re-run `python -m src.preprocess` explicitly first, or
-delete the `.npz`.
+`src/train.py` reuses the cached `data/processed/dataset.npz` and regenerates
+it if the file is missing or predates the validation split fix. If you change
+encoding, scaling, or split settings, run `python -m src.preprocess` explicitly
+before training again.
 
 </details>
 
@@ -419,7 +426,9 @@ delete the `.npz`.
 
 Everything tunable lives in [`config.yaml`](config.yaml): dataset paths, model
 widths/dropouts, optimizer settings, early-stopping patience, class-weighting
-toggle and the inference threshold. Edit it and re-run `python -m src.train`.
+toggle and the validation threshold rule. Retrain after changing training or
+preprocessing settings; a numeric inference threshold override needs only an
+app restart.
 
 ---
 

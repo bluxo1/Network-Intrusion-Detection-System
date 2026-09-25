@@ -14,6 +14,9 @@
   </header>
 
   <main class="wrap">
+    <div class="banner banner-warn">
+      Research result: model scores are not calibrated real-world risk estimates.
+    </div>
     {% if error %}
       <div class="banner banner-error">❌ {{ error }}</div>
       <div class="actions"><a class="submit-btn" href="{{ url_for('index') }}">← Back</a></div>
@@ -33,11 +36,11 @@
             <span class="metric-value">{{ 'ATTACK' if result.is_attack else 'NORMAL' }}</span>
           </div>
           <div class="metric">
-            <span class="metric-name">Confidence</span>
+            <span class="metric-name">Model confidence</span>
             <span class="metric-value">{{ (result.confidence * 100) | round(2) }}%</span>
           </div>
           <div class="metric">
-            <span class="metric-name">Attack probability</span>
+            <span class="metric-name">Attack score</span>
             <span class="metric-value">{{ (result.attack_probability * 100) | round(2) }}%</span>
           </div>
         </div>

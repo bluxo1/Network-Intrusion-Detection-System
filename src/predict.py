@@ -17,6 +17,7 @@ the finer-grained typing to the specialised model.
 from typing import Dict, List, Optional
 
 import json
+import math
 
 import joblib
 import numpy as np
@@ -27,7 +28,52 @@ import torch.nn.functional as F
 from .config import CONFIG, abspath
 from .model import BinaryClassifier, MultiClassClassifier
 from .preprocess import transform
-from .schema import CLASS_NAMES, FEATURE_COLUMNS
+from .schema import BINARY_FLAG_FEATURES, CLASS_NAMES, FEATURE_COLUMNS
+
+
+class InputValidationError(ValueError):
+    """A request contains a feature value the trained model cannot use safely."""
+
+
+def validate_features(features: dict, metadata: dict) -> dict:
+    """Build one complete, finite row from the public 41-feature schema."""
+    if not isinstance(features, dict):
+        raise InputValidationError("features must be a JSON object")
+    unknown = sorted(set(features) - set(FEATURE_COLUMNS))
+    if unknown:
+        raise InputValidationError(f"unknown feature: {unknown[0]}")
+
+    row = {}
+    categories = metadata["categorical_columns"]
+    for col in FEATURE_COLUMNS:
+        if col in categories:
+            default = metadata["categories"][col][0]
+            value = features.get(col, default)
+            if not isinstance(value, str) or not value or len(value) > 100:
+                raise InputValidationError(f"{col} must be a nonempty category (up to 100 characters)")
+            # OneHotEncoder intentionally supports categories not seen in fit.
+            row[col] = value
+            continue
+
+        value = features.get(col, 0)
+        if isinstance(value, bool):
+            raise InputValidationError(f"{col} must be numeric")
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise InputValidationError(f"{col} must be numeric") from exc
+        if not math.isfinite(number) or number < 0 or number > float(np.finfo(np.float32).max):
+            raise InputValidationError(f"{col} must be finite and nonnegative")
+        if col.endswith("rate") and number > 1:
+            raise InputValidationError(f"{col} must be between 0 and 1")
+        if not col.endswith("rate") and not number.is_integer():
+            raise InputValidationError(f"{col} must be an integer")
+        if col in BINARY_FLAG_FEATURES and number not in (0, 1):
+            raise InputValidationError(f"{col} must be 0 or 1")
+        if col == "su_attempted" and number not in (0, 1, 2):
+            raise InputValidationError("su_attempted must be 0, 1 or 2")
+        row[col] = number
+    return row
 
 
 def _build_from_checkpoint(ckpt: dict, device: torch.device) -> torch.nn.Module:
@@ -68,7 +114,12 @@ class Predictor:
         self.binary_model = _build_from_checkpoint(bin_ckpt, self.device)
         self.multiclass_model = _build_from_checkpoint(mc_ckpt, self.device)
 
-        self.threshold = float(CONFIG["inference"]["attack_threshold"])
+        override = CONFIG["inference"].get("attack_threshold")
+        self.threshold = float(
+            self.metadata.get("attack_threshold", 0.5) if override is None else override
+        )
+        if not 0 <= self.threshold <= 1:
+            raise ValueError("inference.attack_threshold must be between 0 and 1")
 
     # ------------------------------------------------------------------
     # Low-level: raw feature matrix -> probabilities
@@ -108,31 +159,24 @@ class Predictor:
         """Predict from a dict of the 41 raw NSL-KDD features.
 
         Missing numeric fields default to 0; missing categoricals default to the
-        first known category. Returns a JSON-serialisable result dict.
+        first known category. Invalid values raise InputValidationError.
         """
-        row = {}
-        for col in FEATURE_COLUMNS:
-            if col in self.metadata["categorical_columns"]:
-                default = self.metadata["categories"][col][0]
-                row[col] = str(features.get(col, default))
-            else:
-                val = features.get(col, 0)
-                try:
-                    row[col] = float(val)
-                except (TypeError, ValueError):
-                    row[col] = 0.0
-
+        row = validate_features(features, self.metadata)
         df = pd.DataFrame([row], columns=FEATURE_COLUMNS)
         X = transform(df, self.scaler, self.encoder)
+        if not np.isfinite(X).all():
+            raise InputValidationError("feature values exceed the supported range")
         out = self.predict_matrix(X)
+        if not np.isfinite(out["binary_prob"]).all() or not np.isfinite(out["multiclass_prob"]).all():
+            raise InputValidationError("feature values exceed the supported range")
 
         idx = int(out["final_index"][0])
         label = self.class_names[idx]
         bin_prob = float(out["binary_prob"][0])
         mc_prob = out["multiclass_prob"][0]
 
-        # Confidence: for Normal, how sure we are it is benign; for an attack,
-        # the specific-type probability from the multi-class model.
+        # Confidence is an uncalibrated model score: for Normal, 1 - binary
+        # score; for an attack, the selected multi-class softmax score.
         confidence = (1.0 - bin_prob) if idx == 0 else float(mc_prob[idx])
 
         return {

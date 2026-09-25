@@ -38,10 +38,9 @@ model:
   multiclass_dropout: [0.4, 0.3, 0.2]
 
 inference:
-  # Probability threshold on the binary model above which traffic is flagged
-  # as an attack. Lowered from 0.5 to 0.35 to favour recall on the held-out
-  # KDDTest+ set: raises the attack detection rate (~67.6% -> ~68.7%) and R2L
-  # recall for a small rise in false-alarm rate (~3.95% -> ~4.4%). Deeper gains
-  # on the rare R2L/U2R classes are dataset-limited and need retraining, not a
-  # threshold change.
-  attack_threshold: 0.35
+  # null uses the threshold selected on validation data during training.
+  # Set a number in [0, 1] to override the saved threshold explicitly.
+  attack_threshold: null
+  # Select the highest F2 score among thresholds with validation false-alarm
+  # rate at or below this bound. KDDTest+ is never used for selection.
+  max_validation_false_alarm_rate: 0.01

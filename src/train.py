@@ -16,13 +16,14 @@ Run with:  ``python -m src.train``
 """
 
 import os
+import json
 from typing import Dict, List
 
 import numpy as np
 import torch
 import torch.nn as nn
-from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
+from sklearn.metrics import roc_curve
 
 from . import preprocess
 from .config import CONFIG, abspath
@@ -50,13 +51,18 @@ def set_seed(seed: int) -> None:
 
 
 def load_arrays() -> Dict[str, np.ndarray]:
-    """Load processed arrays, regenerating them if the cache is missing."""
+    """Load split arrays, regenerating any pre-split cache."""
     npz_path = os.path.join(abspath(CONFIG["paths"]["processed_dir"]), "dataset.npz")
-    if not os.path.exists(npz_path):
-        print("[train] processed dataset not found - running preprocessing...")
+    if os.path.exists(npz_path):
+        with np.load(npz_path) as cached:
+            needs_refresh = "X_val" not in cached.files
+    else:
+        needs_refresh = True
+    if needs_refresh:
+        print("[train] processed split missing or outdated - running preprocessing...")
         preprocess.run()
-    data = np.load(npz_path)
-    return {k: data[k] for k in data.files}
+    with np.load(npz_path) as data:
+        return {k: data[k] for k in data.files}
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +163,33 @@ def save_model(model: nn.Module, path: str, input_dim: int, hidden: List[int],
     print(f"[train] saved {kind} model -> {path}")
 
 
+def calibrate_threshold(model: nn.Module, X_val: np.ndarray, yb_val: np.ndarray,
+                        device: torch.device, max_false_alarm: float) -> float:
+    """Maximise validation F2 while respecting a false-alarm ceiling."""
+    if not 0 <= max_false_alarm <= 1:
+        raise ValueError("max_validation_false_alarm_rate must be between 0 and 1")
+    model.eval()
+    with torch.no_grad():
+        tensor = torch.from_numpy(X_val).to(device)
+        scores = torch.sigmoid(model(tensor)).view(-1).cpu().numpy()
+    false_alarm, recall, thresholds = roc_curve(yb_val, scores)
+    positives = float(yb_val.sum())
+    negatives = float(len(yb_val) - positives)
+    true_pos = recall * positives
+    false_pos = false_alarm * negatives
+    false_neg = positives - true_pos
+    denominator = 5 * true_pos + 4 * false_neg + false_pos
+    f2 = np.divide(5 * true_pos, denominator, out=np.zeros_like(true_pos), where=denominator > 0)
+    eligible = np.flatnonzero((false_alarm <= max_false_alarm) & np.isfinite(thresholds))
+    if len(eligible) == 0:
+        raise ValueError("No finite threshold meets the validation false-alarm ceiling")
+    best = eligible[np.argmax(f2[eligible])]
+    threshold = float(thresholds[best])
+    print(f"[train] validation-selected attack threshold = {threshold:.6f} "
+          f"(recall={recall[best]:.4f}, false-alarm={false_alarm[best]:.4f})")
+    return threshold
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -168,22 +201,11 @@ def main() -> None:
     print(f"[train] device = {device}")
 
     arrays = load_arrays()
-    X_train_full = arrays["X_train"]
-    y_train_full = arrays["y_train"]      # multi-class indices
-    yb_train_full = arrays["yb_train"]    # binary 0/1
-    input_dim = X_train_full.shape[1]
+    X_tr, X_val = arrays["X_train"], arrays["X_val"]
+    y_tr, y_val = arrays["y_train"], arrays["y_val"]
+    yb_tr, yb_val = arrays["yb_train"], arrays["yb_val"]
+    input_dim = X_tr.shape[1]
     num_classes = len(CLASS_NAMES)
-
-    # Stratified train/val split (stratify on the 5-class label to keep the rare
-    # R2L/U2R classes represented in validation).
-    idx = np.arange(len(X_train_full))
-    tr_idx, val_idx = train_test_split(
-        idx, test_size=tcfg["val_split"], random_state=tcfg["seed"], stratify=y_train_full
-    )
-
-    X_tr, X_val = X_train_full[tr_idx], X_train_full[val_idx]
-    y_tr, y_val = y_train_full[tr_idx], y_train_full[val_idx]
-    yb_tr, yb_val = yb_train_full[tr_idx], yb_train_full[val_idx]
 
     binary_model, multiclass_model = build_models(input_dim, mcfg, num_classes=num_classes)
     binary_model.to(device)
@@ -204,6 +226,10 @@ def main() -> None:
     bin_criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
     binary_model = train_loop(
         binary_model, bin_train, bin_val, bin_criterion, device, tcfg, task="binary"
+    )
+    threshold = calibrate_threshold(
+        binary_model, X_val, yb_val, device,
+        CONFIG["inference"]["max_validation_false_alarm_rate"],
     )
 
     # ======================= Multi-class model =======================
@@ -241,6 +267,16 @@ def main() -> None:
         multiclass_model, abspath(CONFIG["artifacts"]["multiclass_model"]),
         input_dim, mcfg["multiclass_hidden"], mcfg["multiclass_dropout"], num_classes, "multiclass",
     )
+    metadata_path = abspath(CONFIG["artifacts"]["metadata"])
+    with open(metadata_path, "r", encoding="utf-8") as f:
+        metadata = json.load(f)
+    metadata["attack_threshold"] = threshold
+    metadata["threshold_selection"] = {
+        "metric": "F2", "max_validation_false_alarm_rate":
+        CONFIG["inference"]["max_validation_false_alarm_rate"],
+    }
+    with open(metadata_path, "w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2)
     print("\n[train] done. Run `python -m src.evaluate` for full test-set metrics.")
 
 
