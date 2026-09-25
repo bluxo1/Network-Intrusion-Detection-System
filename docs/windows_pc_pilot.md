@@ -105,6 +105,12 @@ PCAPNG conversion [2, 6]. This captures traffic from this PC's NICs, not an
 entire home network. Keep both files local. If conversion fails, retain the
 ETL and report the error; do not rerun a longer capture yet.
 
+The repository also includes `scripts/capture_windows_60s.ps1`, which performs
+this bounded capture and conversion from an elevated PowerShell window. Because
+only the first 128 bytes of each packet are kept, some Zeek protocol analyzers
+may report truncated payloads. Do not treat `weird.log` entries alone as attack
+labels [9].
+
 **Output:** file names, sizes, and exact capture start/end times. No packet
 content needs to be sent at this stage.
 
@@ -152,10 +158,28 @@ prediction alone does not prove whether a login was unauthorized.
 ## 6. Hand off the minimum useful sample
 
 Once preflight and event checks succeed, share the audit settings, event
-counts, capture metadata, Zeek log row counts, and a few redacted sample records. Keep raw Security
-events and packet files in `C:\Users\<WindowsUser>\nids-pilot`. The developer will
-define the Windows event/packet schema, build new preprocessing and model code,
-then return to steps 7–10 in the
+counts, capture metadata, Zeek log row counts, and a few redacted sample
+records. Keep raw Security events and packet files in
+`C:\Users\<WindowsUser>\nids-pilot`.
+
+The repository has a separate parser and observation replay for these sources.
+After reviewing labels locally, run the minimized auth export from an elevated
+PowerShell window. Run the replay with the repository's Python environment:
+
+```powershell
+.\scripts\export_windows_auth.ps1
+.\.venv\Scripts\python.exe -m live_ids replay --auth "$env:USERPROFILE\nids-pilot\auth_failures_7d.csv"
+```
+
+The replay also accepts `--labels` for a local reviewed CSV with `record_id`
+and `label` columns, and `--conn` plus `--capture-id` for a Windows-accessible
+Zeek JSON `conn.log`. It reports aggregate counts and candidate alerts without
+printing addresses or account names. For a bounded live check, run
+`.\scripts\watch_windows_auth.ps1` from elevated PowerShell. Its alert is a
+failed-logon burst for review, not a verified attack or ML prediction.
+
+The developer must still obtain labeled attack data, train and evaluate a new
+model for this schema, then return to steps 7–10 in the
 [full live IDS manual](live_ids_manual.md). The model will remain in observation
 mode until held-out and pilot results meet the targets in the scope record.
 
@@ -169,3 +193,4 @@ mode until held-out and pilot results meet the targets in the scope record.
 6. [Microsoft: PktMon ETL to PCAPNG conversion](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/pktmon-etl2pcap)
 7. [Zeek: quick start and offline PCAP analysis](https://docs.zeek.org/en/v8.0.4/quickstart.html)
 8. [Microsoft: WSL networking modes](https://learn.microsoft.com/windows/wsl/networking)
+9. [Zeek: `weird.log` and `notice.log`](https://docs.zeek.org/en/v8.0.8/logs/weird-and-notice.html)

@@ -10,6 +10,20 @@ env/
 data/*.txt
 data/processed/
 
+# Live pilot telemetry stays outside Git; these patterns prevent accidental adds.
+*.pcap
+*.pcapng
+*.etl
+*.evtx
+*.log
+*.jsonl
+auth_failures_*.csv
+known_event_labels.csv
+auth_candidate_alerts.jsonl
+auth_watch_state.json
+nids-pilot/
+captures/
+
 # Ignore generated reports, but keep the reviewed evaluation artifacts.
 reports/*
 !reports/confusion_matrix.png

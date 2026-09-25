@@ -44,6 +44,27 @@ The detector uses a **two-stage (layered) strategy**:
 For a live-traffic pilot, follow the [step-by-step implementation manual](docs/live_ids_manual.md).
 For a Windows-only pilot on your own PC, start with the [Windows procedure](docs/windows_pc_pilot.md).
 
+The separate `live_ids` package parses Zeek JSON `conn.log` records and a
+minimized Windows Security 4625 export. It can replay a **provisional,
+observation-only** rule: four failed logons in a rolling hour. It does not pass
+those records to the NSL-KDD model or classify them as attacks. From an elevated
+PowerShell window, export only timestamps, record IDs, logon types and status
+codes to a folder outside Git. The [live data contract](docs/live_data_schema.md)
+documents the fields and limitations:
+
+```powershell
+.\scripts\export_windows_auth.ps1
+.\.venv\Scripts\python.exe -m live_ids replay --auth "$env:USERPROFILE\nids-pilot\auth_failures_7d.csv"
+```
+
+Add `--labels` for a locally reviewed `record_id,label` CSV and `--conn` plus
+`--capture-id` for a Windows-accessible Zeek JSON `conn.log`. The replay prints
+aggregate counts and candidate-alert metadata, not account names or IPs. Run
+`.\scripts\watch_windows_auth.ps1` in an elevated PowerShell window for a
+bounded 10-minute live check; it never blocks a sign-in. Pilot data and alerts
+stay under `%USERPROFILE%\nids-pilot`, outside this repository. A new live ML
+model and validated attack recall still require labeled attack scenarios.
+
 ---
 
 ## 📐 Architecture
