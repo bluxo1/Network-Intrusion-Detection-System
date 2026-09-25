@@ -41,6 +41,9 @@ The detector uses a **two-stage (layered) strategy**:
 [Production](#-production-notes) · [Troubleshooting](#-troubleshooting) ·
 [Configuration](#-configuration)
 
+For a live-traffic pilot, follow the [step-by-step implementation manual](docs/live_ids_manual.md).
+For a Windows-only pilot on your own PC, start with the [Windows procedure](docs/windows_pc_pilot.md).
+
 ---
 
 ## 📐 Architecture
